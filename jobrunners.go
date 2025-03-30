@@ -134,7 +134,7 @@ func (j JobRunners) View() string {
 		"%d/%d", j.results.NumFinishedJobs(), len(j.results),
 	)))
 
-	if j.results.IsDone() {
+	if len(j.results) > 0 && j.results.IsDone() {
 		longestJob := slices.MaxFunc(j.results, func(a, b *JobResultMessage) int {
 			return cmp.Compare(a.TimeTaken, b.TimeTaken)
 		})
