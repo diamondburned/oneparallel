@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/lmittmann/tint"
 	"github.com/spf13/pflag"
 	"libdb.so/oneparallel"
 )
@@ -136,7 +135,7 @@ func run(ctx context.Context) (bool, error) {
 		defer logFile.Close()
 
 		slog.SetDefault(
-			slog.New(tint.NewHandler(logFile, &tint.Options{
+			slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{
 				Level: slog.LevelDebug,
 			})),
 		)
