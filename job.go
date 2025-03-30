@@ -1,14 +1,13 @@
 package oneparallel
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"os"
 	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // Job defines the interface for a job that can be run concurrently.
@@ -29,14 +28,16 @@ type Job interface {
 type ExecJob struct {
 	exec.Cmd
 	customstr string
-	siginted  bool
+	stopped   atomic.Int32
 }
 
 var _ Job = (*ExecJob)(nil)
 
 // NewExecJob creates a new ExecJob.
 func NewExecJob(cmd *exec.Cmd) *ExecJob {
-	return &ExecJob{Cmd: *cmd}
+	j := &ExecJob{Cmd: *cmd}
+	initExecJob(j)
+	return j
 }
 
 // NewExecJobs creates a new ExecJob for each command.
@@ -78,25 +79,19 @@ func (j *ExecJob) SetCustomString(s string) {
 	j.customstr = s
 }
 
+// Start starts the job and returns an error if it fails to start.
+func (j *ExecJob) Start() error {
+	if j.stopped.Load() > 0 {
+		return errors.New("job has already been stopped")
+	}
+	return j.Cmd.Start()
+}
+
 // Stop stops the job and returns an error if it fails to stop.
 // It first tries to SIGINT the process, but if it's called again, it will
 // SIGKILL the process.
+//
+// It is safe to call Stop concurrently.
 func (j *ExecJob) Stop() error {
-	if !j.siginted && runtime.GOOS != "windows" {
-		slog.Debug(
-			"sending SIGINT to command",
-			"pid", j.Cmd.Process.Pid)
-
-		j.siginted = true
-		return j.Cmd.Process.Signal(os.Interrupt)
-	}
-
-	// out of patience!! or windows :(
-
-	slog.Debug(
-		"sending SIGKILL to command",
-		"pid", j.Cmd.Process.Pid,
-		"siginted", j.siginted)
-
-	return j.Cmd.Process.Kill()
+	return killExecJob(j, j.stopped.Add(1))
 }

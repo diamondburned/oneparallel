@@ -2,6 +2,7 @@ package oneparallel
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -31,12 +32,21 @@ func NewJobLimiter(limit int) JobLimiter {
 
 // Acquire acquires a slot in the semaphore. If the limit has been reached,
 // this will block until a slot becomes available.
-func (j JobLimiter) Acquire() (release func()) {
+func (j JobLimiter) Acquire(ctx context.Context) (release func(), err error) {
 	if j.sema == nil {
-		return func() {}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		} else {
+			return func() {}, nil
+		}
 	}
-	j.sema <- struct{}{}
-	return func() { <-j.sema }
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case j.sema <- struct{}{}:
+		return func() { <-j.sema }, nil
+	}
 }
 
 // JobRunners is a collection of [JobRunner] instances.
@@ -146,6 +156,16 @@ func (j JobRunners) Finalize() (FinalizedJobs, bool) {
 		return j.results, true
 	}
 	return nil, false
+}
+
+// Stop returns a [tea.Cmd] that will stop all the jobs in the [JobRunners]
+// collection.
+func (j JobRunners) Stop() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(j.runners))
+	for _, runner := range j.runners {
+		cmds = append(cmds, runner.Stop())
+	}
+	return tea.Batch(cmds...)
 }
 
 // FinalizedJobs contains the results of jobs.

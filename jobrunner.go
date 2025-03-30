@@ -1,6 +1,7 @@
 package oneparallel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,15 @@ func (j *JobResultMessage) IsDone() bool { return j.IsStarted() && j.TimeTaken >
 // HasError returns true if the job has an error.
 func (j *JobResultMessage) HasError() bool { return j.IsStarted() && j.Error != nil }
 
+func (j *JobResultMessage) update() {
+	j.Job.updateCh <- *j
+}
+
+// JobStopMessage is a message that is sent to signal a job to stop running.
+type JobStopMessage struct {
+	Job *JobRunner
+}
+
 // JobRunner is a running [Job] instance.
 type JobRunner struct {
 	job      Job
@@ -46,7 +56,10 @@ type JobRunner struct {
 	result   *JobResultMessage
 	outFiles []string
 
-	resultCh   chan JobResultMessage
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	updateCh   chan JobResultMessage
 	stopwatch  stopwatch.Model
 	lineBuffer LineBuffer
 }
@@ -74,19 +87,24 @@ func NewJobRunner(job Job, id string, opts JobRunnerOpts) *JobRunner {
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &JobRunner{
 		job:      job,
 		id:       id,
 		opts:     opts,
 		outFiles: outFiles,
 
-		resultCh:   make(chan JobResultMessage, 1),
+		ctx:    ctx,
+		cancel: cancel,
+
+		updateCh:   make(chan JobResultMessage, 1),
 		stopwatch:  stopwatch.NewWithInterval(100 * time.Millisecond),
 		lineBuffer: *newLineBuffer(jobBufferStyle, opts.LastLines),
 	}
 }
 
-func (j *JobRunner) start() error {
+func (j *JobRunner) start(ctx context.Context, result JobResultMessage) error {
 	slog := slog.With("job", j.id)
 
 	stdout, err := j.job.StdoutPipe()
@@ -152,60 +170,79 @@ func (j *JobRunner) start() error {
 
 			rmap[stdout] = append(rmap[stdout], stdoutFile)
 			rmap[stderr] = append(rmap[stderr], stderrFile)
-
 		}
 	}
 
-	slog.Debug("starting job")
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
 
-	if err := j.job.Start(); err != nil {
+		if err = j.job.Start(); err != nil {
+			return
+		}
+		if err = startReadingLinesForReaders(rmap); err != nil {
+			err = fmt.Errorf("failed to read job output: %w", err)
+			return
+		}
+		if err = j.job.Wait(); err != nil {
+			return
+		}
+	}()
+
+	select {
+	case <-doneCh:
 		return err
-	}
 
-	slog.Debug(
-		"starting I/O routines",
-		"stdout", stdout,
-		"stderr", stderr,
-		"rmap", rmap)
+	case <-ctx.Done():
+		// cancellation from parent context
+		j.job.Stop()
 
-	if err := startReadingLinesForReaders(rmap); err != nil {
-		return fmt.Errorf("failed to read job output: %w", err)
-	}
+		select {
+		case <-doneCh:
 
-	slog.Debug("waiting for job to finish")
+		case <-time.After(5 * time.Second):
+			result.Error = errors.New("job did not stop gracefully, killing...")
+			result.update()
 
-	if err := j.job.Wait(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			slog.Debug(
-				"job failed because process exited with non-zero status",
-				"exit_code", exitErr.ExitCode())
+			j.job.Stop()
+			<-doneCh
 		}
 
-		return err
+		return ctx.Err()
 	}
 
-	slog.Debug("job completed successfully")
-	return nil
+}
+
+// Stop signals the job to stop running.
+func (j *JobRunner) Stop() tea.Cmd {
+	return func() tea.Msg {
+		return JobStopMessage{Job: j}
+	}
 }
 
 func (j *JobRunner) Init() tea.Cmd {
-	go func() {
-		release := j.opts.JobLimiter.Acquire()
-		defer release()
+	go func(ctx context.Context) {
+		release, err := j.opts.JobLimiter.Acquire(ctx)
 
-		result := JobResultMessage{Job: j}
-		j.resultCh <- result
+		result := JobResultMessage{
+			Job:   j,
+			Error: err,
+		}
+		result.update()
 
-		t := time.Now()
-		result.Error = j.start()
-		result.TimeTaken = time.Since(t)
-		j.resultCh <- result
-	}()
+		if err == nil {
+			t := time.Now()
+			result.Error = j.start(ctx, result)
+			result.TimeTaken = time.Since(t)
+			result.update()
+		}
+
+		release()
+	}(j.ctx)
 
 	return tea.Batch(
 		j.lineBuffer.Init(),
-		xtea.ChannelCmd(j.resultCh),
+		xtea.ChannelCmd(j.updateCh),
 	)
 }
 
@@ -229,13 +266,12 @@ func (j *JobRunner) Update(msg tea.Msg) (*JobRunner, tea.Cmd) {
 
 		j.result = &msg
 
-	case tea.InterruptMsg:
-		if err := j.job.Stop(); err != nil {
-			slog.Error(
-				"failed to signal job stop",
-				"job", j.id,
-				"err", err)
+	case JobStopMessage:
+		if msg.Job != j {
+			break
 		}
+
+		j.cancel()
 	}
 
 	j.lineBuffer, cmd = j.lineBuffer.Update(msg)
@@ -244,7 +280,7 @@ func (j *JobRunner) Update(msg tea.Msg) (*JobRunner, tea.Cmd) {
 	j.stopwatch, cmd = j.stopwatch.Update(msg)
 	cmds = append(cmds, cmd)
 
-	cmds = append(cmds, xtea.ChannelCmd(j.resultCh))
+	cmds = append(cmds, xtea.ChannelCmd(j.updateCh))
 
 	return j, tea.Batch(cmds...)
 }
