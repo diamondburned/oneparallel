@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -72,10 +70,7 @@ func init() {
 func main() {
 	log.SetFlags(0)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-
-	ok, err := run(ctx)
+	ok, err := run()
 	if err != nil && !errors.Is(err, pflag.ErrHelp) {
 		log.SetOutput(os.Stderr)
 		log.Println("error:", err)
@@ -85,7 +80,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) (bool, error) {
+func run() (bool, error) {
 	if err := pflag.CommandLine.Parse(os.Args[1:]); err != nil {
 		return errors.Is(err, pflag.ErrHelp), err
 	}
@@ -98,7 +93,7 @@ func run(ctx context.Context) (bool, error) {
 
 	args := pflag.CommandLine.Args()
 
-	parsed, err := parseArgsToCommands(args, ctx)
+	parsed, err := parseArgsToCommands(args)
 	if err != nil {
 		return false, err
 	}
@@ -160,7 +155,7 @@ type parsedArgs struct {
 	jobArgs  [][]string
 }
 
-func parseArgsToCommands(args []string, cmdContext context.Context) (parsedArgs, error) {
+func parseArgsToCommands(args []string) (parsedArgs, error) {
 	separatedAt := slices.Index(args, ":::")
 	if separatedAt == -1 {
 		return parsedArgs{}, errors.New("missing ::: separator for arguments, see --help")
@@ -195,7 +190,7 @@ func parseArgsToCommands(args []string, cmdContext context.Context) (parsedArgs,
 			args = slices.Concat(baseCommand, args)
 		}
 
-		cmd := exec.CommandContext(cmdContext, args[0], args[1:]...)
+		cmd := exec.Command(args[0], args[1:]...)
 		parsed.commands = append(parsed.commands, cmd)
 	}
 

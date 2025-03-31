@@ -210,7 +210,6 @@ func (j *JobRunner) start(ctx context.Context, result JobResultMessage) error {
 
 		return ctx.Err()
 	}
-
 }
 
 // Stop signals the job to stop running.
