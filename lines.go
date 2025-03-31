@@ -26,19 +26,26 @@ type lineBufferMsg struct {
 	line string
 }
 
+// MaxLineBufferHeight is the maximum number of lines that can be buffered in
+// the [LineBuffer].
+const MaxLineBufferHeight = 128
+
 // LineBuffer is a UI element that buffers the last few lines of text.
 type LineBuffer struct {
 	msgCh chan lineBufferMsg
 	style lipgloss.Style
 	lines []string
-	width int
+
+	Width  int
+	Height int
 }
 
-func newLineBuffer(style lipgloss.Style, limit int) *LineBuffer {
+func newLineBuffer(style lipgloss.Style, height int) *LineBuffer {
 	return &LineBuffer{
-		msgCh: make(chan lineBufferMsg),
-		style: style,
-		lines: make([]string, limit),
+		msgCh:  make(chan lineBufferMsg),
+		style:  style,
+		lines:  make([]string, MaxLineBufferHeight),
+		Height: height,
 	}
 }
 
@@ -63,10 +70,27 @@ func (l LineBuffer) Init() tea.Cmd {
 	return xtea.ChannelCmd(l.msgCh)
 }
 
+type lineBufferHeightMsg struct {
+	height int
+}
+
+// SetHeight sets the height of the line buffer.
+// The height can not be higher than
+func (l LineBuffer) SetHeight(height int) tea.Cmd {
+	height = min(height, MaxLineBufferHeight)
+	height = max(height, 0)
+	return func() tea.Msg {
+		return lineBufferHeightMsg{height: height}
+	}
+}
+
 func (l LineBuffer) Update(msg tea.Msg) (LineBuffer, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		l.width = msg.Width
+		l.Width = msg.Width
+
+	case lineBufferHeightMsg:
+		l.Height = msg.height
 
 	case lineBufferMsg:
 		if msg.src == l.msgCh {
@@ -87,8 +111,8 @@ func (l LineBuffer) View() string {
 
 	var b strings.Builder
 	b.Grow(cap)
-	for _, line := range l.lines {
-		b.WriteString(l.style.Width(l.width).Render(line))
+	for _, line := range l.lines[len(l.lines)-l.Height:] {
+		b.WriteString(l.style.Width(l.Width).Render(line))
 		b.WriteString("\n")
 	}
 

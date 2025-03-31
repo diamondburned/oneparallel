@@ -195,7 +195,13 @@ func (j *JobRunner) start(ctx context.Context, result JobResultMessage) error {
 
 	case <-ctx.Done():
 		// cancellation from parent context
-		j.job.Stop()
+		if err := j.job.Stop(); err != nil {
+			result.Error = fmt.Errorf("stop error: %w", err)
+			result.update()
+		} else {
+			result.Error = errors.New("stopping job")
+			result.update()
+		}
 
 		select {
 		case <-doneCh:
@@ -245,6 +251,20 @@ func (j *JobRunner) Init() tea.Cmd {
 	)
 }
 
+// SetHeight sets the height of the job runner's line buffer.
+// The height must be at least 1.
+func (j *JobRunner) SetHeight(height int) tea.Cmd {
+	height = min(height, MaxLineBufferHeight+2)
+	height = max(height, 1)
+
+	// Adjust for the padding.
+	// LineBuffer automatically caps our height as well, so a negative value is
+	// acceptable.
+	height -= 2
+
+	return j.lineBuffer.SetHeight(height)
+}
+
 func (j *JobRunner) Update(msg tea.Msg) (*JobRunner, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -288,6 +308,7 @@ const (
 	prefixHeader = "╭╴"
 	prefixBuffer = "│"
 	prefixFooter = "╰╴"
+	prefixSingle = ""
 )
 
 var jobHeaderStyle = lipgloss.NewStyle().
@@ -321,6 +342,12 @@ var jobBufferStyle = lipgloss.NewStyle().
 func (j *JobRunner) View() string {
 	var b strings.Builder
 
+	if j.lineBuffer.Height > 0 {
+		b.WriteString(jobBorderStyle.Render(prefixHeader))
+	} else {
+		b.WriteString(jobBorderStyle.Render(prefixSingle))
+	}
+
 	var style lipgloss.Style
 	switch {
 	case !j.result.IsStarted():
@@ -332,8 +359,7 @@ func (j *JobRunner) View() string {
 	default:
 		style = jobDoneStyle
 	}
-
-	b.WriteString(jobBorderStyle.Render(prefixHeader) + style.Render(j.job.String()))
+	b.WriteString(style.Render(j.job.String()))
 
 	if len(j.outFiles) > 0 {
 		b.WriteString(" ")
@@ -369,11 +395,11 @@ func (j *JobRunner) View() string {
 
 	b.WriteString("\n")
 
-	b.WriteString(j.lineBuffer.View())
-
-	b.WriteString(jobBorderStyle.Render(prefixFooter))
-
-	b.WriteString("\n")
+	if j.lineBuffer.Height > 0 {
+		b.WriteString(j.lineBuffer.View())
+		b.WriteString(jobBorderStyle.Render(prefixFooter))
+		b.WriteString("\n")
+	}
 
 	return b.String()
 }

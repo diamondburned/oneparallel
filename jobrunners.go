@@ -168,6 +168,24 @@ func (j JobRunners) Stop() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// SetTotalHeight returns a command that sets the total height for all the job
+// runners.
+// It overrides [SetJobHeight].
+func (j JobRunners) SetTotalHeight(totalHeight int) tea.Cmd {
+	totalHeight -= 1 // account for footer
+	return j.SetJobHeight(totalHeight / len(j.runners))
+}
+
+// SetJobHeight returns a command that sets the height for each job runner.
+// It overrides [SetTotalHeight].
+func (j JobRunners) SetJobHeight(height int) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(j.runners))
+	for _, runner := range j.runners {
+		cmds = append(cmds, runner.SetHeight(height))
+	}
+	return tea.Batch(cmds...)
+}
+
 // FinalizedJobs contains the results of jobs.
 // It is always of length equal to the number of jobs that have been run, but
 // jobs that have not yet completed will have a nil value in the slice.

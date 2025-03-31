@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/pflag"
 	"libdb.so/oneparallel"
@@ -138,7 +139,7 @@ func run() (bool, error) {
 		log.SetOutput(io.Discard)
 	}
 
-	if _, err := tea.NewProgram(&model{runners}).Run(); err != nil {
+	if _, err := tea.NewProgram(newModel(runners)).Run(); err != nil {
 		return false, err
 	}
 
@@ -198,7 +199,16 @@ func parseArgsToCommands(args []string) (parsedArgs, error) {
 }
 
 type model struct {
-	runners oneparallel.JobRunners
+	viewport viewport.Model
+	runners  oneparallel.JobRunners
+	altMode  bool
+}
+
+func newModel(runners oneparallel.JobRunners) *model {
+	return &model{
+		viewport: viewport.New(0, 0),
+		runners:  runners,
+	}
 }
 
 func (m *model) Init() tea.Cmd {
@@ -216,22 +226,80 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		"msg_type", fmt.Sprintf("%T", msg))
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height
+
+		cmds = append(cmds, m.updateJobHeights())
+
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
+		switch msg.String() {
+		case "ctrl+c":
 			cmds = append(cmds, m.runners.Stop())
+		case "f":
+			cmds = append(cmds, m.SetFullscreen(!m.altMode))
 		}
+
+	case fullscreenMsg:
+		m.altMode = msg.fullscreen
+		cmds = append(cmds, m.updateJobHeights())
 	}
 
 	m.runners, cmd = m.runners.Update(msg)
 	cmds = append(cmds, cmd)
 
-	if _, finalized := m.runners.Finalize(); finalized {
-		cmds = append(cmds, tea.Quit)
+	if m.altMode {
+		m.viewport.SetContent(m.runners.View())
 	}
 
-	return m, tea.Batch(cmds...)
+	// If the runners are already done, then we quit the program after
+	// everything is executed.
+	if _, finalized := m.runners.Finalize(); finalized {
+		// Exit alt mode first so that the latest view is seen in the
+		// scrollback.
+		if m.altMode {
+			cmds = append(cmds, m.SetFullscreen(false))
+			return m, tea.Batch(cmds...)
+		}
+
+		// If we're still switching fullscreen, then don't quit yet.
+		// Let this run first.
+		_, isFullscreenMsg := msg.(fullscreenMsg)
+		if isFullscreenMsg {
+			return m, tea.Batch(cmds...)
+		}
+
+		return m, tea.Sequence(tea.Batch(cmds...), tea.Quit)
+	} else {
+		return m, tea.Batch(cmds...)
+	}
+}
+
+func (m *model) updateJobHeights() tea.Cmd {
+	if m.altMode {
+		return m.runners.SetTotalHeight(m.viewport.Height)
+	}
+	return m.runners.SetJobHeight(lastLines)
+}
+
+type fullscreenMsg struct {
+	fullscreen bool
+}
+
+// SetFullscreen returns a command that toggles fullscreen mode.
+func (m *model) SetFullscreen(fullscreen bool) tea.Cmd {
+	msg := func() tea.Msg { return fullscreenMsg{fullscreen} }
+	if fullscreen {
+		return tea.Sequence(tea.EnterAltScreen, msg)
+	} else {
+		return tea.Sequence(tea.ExitAltScreen, msg)
+	}
 }
 
 func (m *model) View() string {
-	return m.runners.View()
+	if m.altMode {
+		return m.viewport.View()
+	} else {
+		return m.runners.View()
+	}
 }
