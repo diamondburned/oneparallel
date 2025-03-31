@@ -18,8 +18,8 @@ import (
 	"libdb.so/oneparallel/internal/xtea"
 )
 
-// TimeTakenAccuracy is the accuracy for measuring the time taken for a job.
-// This is used for displaying the elapsed time for a job in the UI.
+// TimeTakenAccuracy is the accuracy for displaying the time taken for a job.
+// This is only useful for [time.Duration.String].
 const TimeTakenAccuracy = time.Millisecond
 
 // JobResultMessage is a message that contains the result of a job.
@@ -366,17 +366,21 @@ func (j *JobRunner) View() string {
 		b.WriteString(jobOutputStyle.Render("[" + strings.Join(j.outFiles, " + ") + "]"))
 	}
 
-	timeTaken := j.stopwatch.Elapsed()
+	var timeTaken string
 	if j.result.IsDone() {
 		// Prefer the actual measured time taken from the job result if available.
+		timeTaken = j.result.TimeTaken.Round(TimeTakenAccuracy).String()
+	} else {
 		// Otherwise, use the elapsed time from the stopwatch.
-		timeTaken = j.result.TimeTaken
+		//
+		// Always show this duration in seconds with 1 decimal place for
+		// prettyness. Realistically, no one is going to stare at the timer for
+		// more than 100s, so it's fine if we never show minutes.
+		timeTaken = fmt.Sprintf("%.1fs", j.stopwatch.Elapsed().Seconds())
 	}
 
 	b.WriteString(" ")
-	b.WriteString(jobDurationStyle.Render(fmt.Sprintf(
-		"[%s]", timeTaken.Round(TimeTakenAccuracy).String(),
-	)))
+	b.WriteString(jobDurationStyle.Render(fmt.Sprintf("[%s]", timeTaken)))
 
 	if j.result != nil && j.result.Error != nil {
 		b.WriteString(" ")
