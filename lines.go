@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,8 +41,8 @@ type LineBuffer struct {
 	Height int
 }
 
-func newLineBuffer(style lipgloss.Style, height int) *LineBuffer {
-	return &LineBuffer{
+func newLineBuffer(style lipgloss.Style, height int) LineBuffer {
+	return LineBuffer{
 		msgCh:  make(chan lineBufferMsg),
 		style:  style,
 		lines:  make([]string, MaxLineBufferHeight),
@@ -93,10 +94,11 @@ func (l LineBuffer) Update(msg tea.Msg) (LineBuffer, tea.Cmd) {
 		l.Height = msg.height
 
 	case lineBufferMsg:
-		if msg.src == l.msgCh {
-			copy(l.lines[:len(l.lines)-1], l.lines[1:]) // shift left
-			l.lines[len(l.lines)-1] = msg.line
+		if msg.src != l.msgCh {
+			break
 		}
+		copy(l.lines, l.lines[1:]) // shift left
+		l.lines[len(l.lines)-1] = msg.line
 	}
 
 	return l, xtea.ChannelCmd(l.msgCh)
@@ -104,19 +106,22 @@ func (l LineBuffer) Update(msg tea.Msg) (LineBuffer, tea.Cmd) {
 
 // View returns the buffered lines as a single string.
 func (l LineBuffer) View() string {
-	var cap int
-	for _, line := range l.lines {
-		cap += len(line) + 1
+	style := l.style.Width(l.Width)
+	allLines := make([]string, 0, l.Height)
+
+	// Iterate last lines first so we can account for line wrapping.
+	for _, line := range slices.Backward(l.lines) {
+		lines := strings.Split(style.Render(line), "\n")
+
+		allLines = slices.Insert(allLines, 0, lines...)
+
+		if len(allLines) >= l.Height {
+			allLines = allLines[len(allLines)-l.Height:]
+			break
+		}
 	}
 
-	var b strings.Builder
-	b.Grow(cap)
-	for _, line := range l.lines[len(l.lines)-l.Height:] {
-		b.WriteString(l.style.Width(l.Width).Render(line))
-		b.WriteString("\n")
-	}
-
-	return b.String()
+	return strings.Join(allLines, "\n") + "\n"
 }
 
 type fileLineWriter struct {

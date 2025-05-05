@@ -100,7 +100,7 @@ func NewJobRunner(job Job, id string, opts JobRunnerOpts) *JobRunner {
 
 		updateCh:   make(chan JobResultMessage, 1),
 		stopwatch:  stopwatch.NewWithInterval(100 * time.Millisecond),
-		lineBuffer: *newLineBuffer(jobBufferStyle, opts.LastLines),
+		lineBuffer: newLineBuffer(jobBufferStyle, opts.LastLines),
 	}
 }
 
