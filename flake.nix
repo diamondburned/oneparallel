@@ -40,7 +40,7 @@
             src = self;
             version = self.rev or "unknown";
 
-            vendorHash = "sha256-OltzNdimz8K143O3kRxj3FUe8SCBKZLawb6M18OP6B4=";
+            vendorHash = "sha256-hsp4m5dGBpKl6axs05KK0JSJWG2Ncwu4kisgH2R7E+U=";
 
             meta = with pkgs.lib; {
               description = "Human-friendly parallelization tool similar to GNU/Moreutils Parallel.";
