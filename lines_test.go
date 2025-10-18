@@ -37,8 +37,8 @@ func TestLineBuffer(t *testing.T) {
 			},
 			outLines: []string{
 				"",
-				"meowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeow",
-				"meowmeowmeowmeowmeowmeowmeowmeowmeowmeow",
+				"meowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowm",
+				"eowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeow",
 			},
 		},
 		{
@@ -52,8 +52,8 @@ func TestLineBuffer(t *testing.T) {
 			},
 			outLines: []string{
 				"hi2",
-				"meowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeow",
-				"meowmeowmeowmeowmeowmeowmeowmeowmeowmeow",
+				"meowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeowm",
+				"eowmeowmeowmeowmeowmeowmeowmeowmeowmeowmeow",
 			},
 		},
 	}
