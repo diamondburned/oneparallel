@@ -31,6 +31,10 @@ type lineBufferMsg struct {
 // the [LineBuffer].
 const MaxLineBufferHeight = 128
 
+// widthMargin is how much space to reserve when line wrapping.
+// 3 is just the vertical bar, a space, and a character.
+const widthMargin = 3
+
 // LineBuffer is a UI element that buffers the last few lines of text.
 type LineBuffer struct {
 	msgCh chan lineBufferMsg
@@ -106,7 +110,10 @@ func (l LineBuffer) Update(msg tea.Msg) (LineBuffer, tea.Cmd) {
 
 // View returns the buffered lines as a single string.
 func (l LineBuffer) View() string {
-	style := l.style.Width(l.Width)
+	style := l.style
+	// Adjust for line wrapping. Prevent negative width.
+	style = style.Width(max(1, l.Width-widthMargin))
+
 	allLines := make([]string, 0, l.Height)
 
 	// Iterate last lines first so we can account for line wrapping.
